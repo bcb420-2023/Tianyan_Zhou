@@ -1,0 +1,219 @@
+
+--
+title: "BCB420-A1"
+output: html_notebook
+---
+## 1. Preparations:
+
+#Packages
+load all the packages required
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+if (!requireNamespace("GEOmetadb", quietly = TRUE))
+  BiocManager::install("GEOmetadb")
+if(!requireNamespace("edgeR", quietly = TRUE))
+  BiocManager::install("edgeR")
+if(!requireNamespace("biomaRt", quietly = TRUE))
+  BiocManager::install("biomaRt")
+library("BiocManager")
+library("GEOmetadb")
+library("edgeR")
+library("biomaRt")
+library("knitr")
+```
+#Setting up GEPmetadb
+```{r}
+if(!file.exists('GEOmetadb.sqlite')) getSQLiteFile()
+```
+#Connect to the newly downloaded GEO meta data database
+```{r}
+con <- dbConnect(SQLite(),'GEOmetadb.sqlite')
+```
+#Data selection
+I create a sql searches in the GEOmetadb.sqlite, looking for dataset with submission date after 2013, associated with diabetes, homo sapians, and high-throughput sequencing.
+```{r}
+sql <- paste("SELECT DISTINCT gse.title,gse.gse, gpl.title,",
+             " gse.submission_date,",
+             " gse.supplementary_file",
+             "FROM",
+             "  gse JOIN gse_gpl ON gse_gpl.gse=gse.gse",
+             "  JOIN gpl ON gse_gpl.gpl=gpl.gpl",
+             "WHERE",
+             "  gse.submission_date > '2013-01-01' AND",
+             "  gse.title LIKE '%diabetes%' AND", 
+             "  gpl.organism LIKE '%Homo sapiens%' AND",
+             "  gpl.technology LIKE '%high-throughput seq%' ",
+             "  ORDER BY gse.submission_date DESC",sep=" ")
+
+rs <- dbGetQuery(con,sql) ##put the result of search into a variable
+head(rs) #Show the 6 top results
+```
+#Break the f
+```{r}
+unlist(lapply(rs$supplementary_file,
+              FUN = function(x){x <- unlist(strsplit(x,";")) ;
+              x <- x[grep(x,pattern="txt",ignore.case=TRUE)];
+                tail(unlist(strsplit(x,"/")),n=1)})) [1:30]
+
+counts_files <- rs$supplementary_file[grep(rs$supplementary_file,
+                                           pattern = "count", ignore.case = TRUE)]
+
+```
+
+#The datasets choosed is GSE150621. The following step is data exploration of the dataset chose. 
+```{r}
+sfiles <- getGEOSuppFiles('GSE150621')
+fnames <- rownames(sfiles)
+exp_data = read.delim(fnames[1],header=TRUE, check.names = FALSE)  #load the counts data into R 
+kable(exp_data, format = "html") #show the first 15 rows and 5 colomns of b2
+
+```
+# It shows that the gene identifiers used in the dataset is HUGO gene names, which is good for the cleaning process.
+
+## 2. Data cleaning 
+
+#What is the dimension of our data and the colomn names of the data?
+```{r}
+dim(exp_data)
+colnames(exp_data) #There are 14 different groups in the dataset. Their series files show that the last two letters determine the exposure(control/gdm), and the sex of the group. "C" refers to control, "D" refers to gdm exposure group, "F" refers to female, and "M" refers to male. There are 6 controls groups and 8 gdm exposure groups. 7 groups for females, and 7 groups for males. 
+```
+#Group them by the last letters.他们按照控制组和实验组进行分类
+
+
+#check for the duplicated genes 有两个不是基因名称而是用日期表示的数据有重复，不确定是否需要删除?
+```{r}
+summarized_gene_counts <- sort(table(exp_data$refGene), decreasing = TRUE)
+kable(summarized_gene_counts[which(summarized_gene_counts>1)[1:10]], format="html")
+#It shows that entries "1-Mar" and "2-Mar" has a frequency of 2
+a = subset(exp_data, refGene == "1-Mar")
+b = subset(exp_data, refGene == "2-Mar")
+a
+b
+#It shows that "1-Mar" and "2-Mar" have values in groups. But their relationships to the specific genes are not clear. Therefore, they should be removed in order to keep the accuracy of the data. 
+```
+
+
+#According to the edgeR protocol, filter weakly expressed and noninformative data.去除一些计数很少的数字，这里不确定n要用多少。
+```{r}
+cpms = cpm(exp_data[, 2:15])
+rownames(cpms) <- exp_data[,1]
+keep = rowSums(cpms >1) >= n
+data_filtered = exp_data[keep,]
+```
+#now check the dimension of the filtered dataset.
+```{r}
+dim(data_filtered)
+```
+
+
+#Box plot
+```{r}
+data2plot <- log2(cpm(data_filtered[, 2: ncol(data_filtered)]))
+boxplot(data2plot, 
+        xlab = "Samples", 
+        ylab = "log2 CPM", 
+        las = 2, 
+        cex = 0.5, 
+        cex.lab = 0.5,
+        cex.axis = 0.5, 
+        main = "RNASeq Samples")
+abline(h = median(apply(data2plot,2,median)),
+       col = "green",lwd = 0.6, lty = "dashed")
+```
+#Density Plot
+```{r}
+counts_density <- 
+  apply(log2(cpm(data_filtered[, 2:length(colnames(data_filtered))])),
+        2, density)
+ #calculate the limits across all the samples
+xlim <- 0; ylim <- 0
+for (i in 1:length(counts_density)) {
+  xlim <- range(c(xlim, counts_density[[i]]$x)); 
+  ylim <- range(c(ylim, counts_density[[i]]$y))
+}
+ cols <- rainbow(length(counts_density))
+ ltys <- rep(1, length(counts_density))
+ 
+ #plot the first density plot to initialize the plot
+ plot(counts_density[[1]], 
+      xlim=xlim, 
+      ylim=ylim, 
+      type="n", 
+      ylab="Smoothing density of log2-CPM", 
+      main="Density Plot", 
+      cex.lab = 0.8)
+ 
+ #plot each line
+ for (i in 1:length(counts_density)) {
+   lines(counts_density[[i]], 
+         col = cols[i], 
+         lty = ltys[i])
+ }
+   
+ #create legend
+ legend("topright", colnames(data2plot), 
+ col=cols, lty=ltys, cex=0.75, 
+ border ="blue", text.col = "green4", 
+ merge = TRUE, bg = "gray90")
+```
+
+#Mapping 这里有些基因表示是HGNC的，但是不确定是否所有的都是。需要把所有表示都转换成HGNC。
+
+
+## 3. Normalization 不确定用哪种归一方法。
+
+#creating our DGEList objects to be used by edgeR
+```{r}
+filter_data_matrix <- as.matrix(data_filtered[,2:7])
+rownames(filter_data_matrix) <- data_filtered$gene_id
+d = DGEList(counts=filter_data_matrix,group=samples$condition)
+```
+
+#Calculate the normalization factors
+```{r}
+d = calcNormFactors(d)
+normalized_counts <- cpm(d)
+```
+
+#Inspect the sample separation using a multidimenstional scaling plot.
+```{r}
+plotMDS(d, labels=rownames(samples),
+        col = c("darkgreen","blue")[factor(samples$condition)])
+```
+
+
+
+
+
+
+
+##Interpretation
+1. What are the control and test conditions of the dataset?
+Control condition is the YTHDF2 expression levels in public databses.
+test condition i the YTHDF2 expression level in gastric cancer patients samples.
+
+2. Why is the dataset of interest to you?
+Gastric cancer is one of the most common malignancies in the world and this dataset study how YTHDF2 inhibits it by regulating the FOXC2 signalling pathway. 
+
+3. Were there expression values that were not unique for specific genes? How did you handle these?
+There is no duplicated genes.
+
+4. Were there expression values that could not be mapped to current HUGO symbols?
+All the expression values cannot be mapped to current HUGO symbols and there might exist an error 
+in the coding, tried but did not come up with a solution. 
+
+5. How many outliers were removed?
+no outliers were removed
+
+6. How did you handle replicates?
+There is no replicated in my dataset.
+
+7. What is the final coverage of your dataset?
+14526 out of 53465
+
+
+##reference
+Lecture modules:https://q.utoronto.ca/courses/248455/files/19147947?module_item_id=3463364
+
+Shen, X., Zhao, K., Xu, L., Cheng, G., Zhu, J., Gan, L., Wu, Y., & Zhuang, Z. (2021). YTHDF2 Inhibits Gastric Cancer Cell Growth by Regulating FOXC2 Signaling Pathway. Frontiers in genetics, 11, 592042. https://doi.org/10.3389/fgene.2020.592042
