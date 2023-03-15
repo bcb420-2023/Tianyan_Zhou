@@ -381,28 +381,28 @@ I used annotation data from GO biological process, reactome, and wikipathways. T
 
 The top-hit for GO:BP term is negative regulation of viral process, inteerferon alpha/beta signalling for reactome, and type I interferon induction and signaling during SARS-CoV-2 infection.
 
-[***Figure 1. All differencially expressed genes over-representation analysis results from GO:BP, term size = 200.***]](./gProfiler/all_genes_GOBP.png)
+![***Figure 1. All differencially expressed genes over-representation analysis results from GO:BP, term size = 200.***](./gProfiler/all_genes_GOBP.png)
 
-![***Figure 2. All differencially expressed genes over-representation analysis results from Reactome, term size = 200.***]](./gProfiler/all_genes_reac.png)
+![***Figure 2. All differencially expressed genes over-representation analysis results from Reactome, term size = 200.***](./gProfiler/all_genes_reac.png)
 
-![***Figure 3. All differencially expressed genes over-representation analysis results from WikiPathways, term size = 200.***]](./gProfiler/all_genes_wp.png)
+![***Figure 3. All differencially expressed genes over-representation analysis results from WikiPathways, term size = 200.***](./gProfiler/all_genes_wp.png)
 
 ### results only using the upregulated genes:
 The top-hit term for GO:BP is positive regulation of BMP signalling pathway, Loss of Function of FBXW7 in Cancer and NOTCH1 Signaling for reactome, and Clock-controlled autophagy in bone metabolism for wikiPathways.
 
-![***Figure 4. Up-regulated genes over-representation analysis results from GO:BP, term size = 200.***]](./gProfiler/up_regulated_GOBP.png)
+![***Figure 4. Up-regulated genes over-representation analysis results from GO:BP, term size = 200.***](./gProfiler/up_regulated_GOBP.png)
 
-![***Figure 5. Up-regulated genes over-representation analysis results from Reactome, term size = 200.***]](./gProfiler/up_regulated_reac.png)
+![***Figure 5. Up-regulated genes over-representation analysis results from Reactome, term size = 200.***](./gProfiler/up_regulated_reac.png)
 
-![***Figure 6. Up-regulated genes over-representation analysis results from WikiPathways, term size = 200.***]](./gProfiler/up_regulated_wp.png)
+![***Figure 6. Up-regulated genes over-representation analysis results from WikiPathways, term size = 200.***](./gProfiler/up_regulated_wp.png)
 
 ### results only using the downregulated genes:
 The top-hit term for GO:BP is negative regulation of viral process, Interferon alpha/beta signaling for reactome, and Type I interferon induction and signaling during SARS-CoV-2 infection.
-![***Figure 7. down-regulated genes over-representation analysis results from GO:BP, term size = 200.***]](./gProfiler/down_regulated_GOBP.png)
+![***Figure 7. down-regulated genes over-representation analysis results from GO:BP, term size = 200.***](./gProfiler/down_regulated_GOBP.png)
 
-![***Figure 8. down-regulated genes over-representation analysis results from Reactome, term size = 200.***]](./gProfiler/down_regulated_reac.png)
+![***Figure 8. down-regulated genes over-representation analysis results from Reactome, term size = 200.***](./gProfiler/down_regulated_reac.png)
 
-![***Figure 9. down-regulated genes over-representation analysis results from WikiPathways, term size = 200.***]](./gProfiler/down_regulated_wp.png)
+![***Figure 9. down-regulated genes over-representation analysis results from WikiPathways, term size = 200.***](./gProfiler/down_regulated_wp.png)
 
 
 
