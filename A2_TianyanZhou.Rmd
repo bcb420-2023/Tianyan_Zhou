@@ -1,0 +1,456 @@
+---
+title: "BCB420 A2: Differencial Gene expression and Preliminary ORA"
+author: "Tianyan Zhou"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    df_print: paged
+bibliography: a2.bib
+nocite: '@*'
+---
+
+# Introduction
+In this notebook, I am going to perform differencial gene expression analysis and over-threshold representation analysis to the normalized data of GSE150621, which studys the gestational diabetes(GDM) and human amniocytes.
+In the original paper [Exposure to gestational diabetes enriches immune-related pathways in the transcriptome and methylome of human amniocytes](https://doi.org/10.1210/clinem/dgaa466)[@pinney2020exposure], a nested case-control study was performed in second trimeseter amniocytes matched for offspring sex, maternal race/ethnicity, maternal age, gestational age at amniocentesis, gestational age at birth and gestational diabetes status. Sex-specific RNA-sequencing was completed and gene expression changes were identified.
+Therefore, the samples are grouped by GDM-exposured and control, and by sex. There are 14 of them, with the last two letters indicated their groups: C for controls, D for GDM exposured, F for female, and M for male.
+
+# Preparations and Data Review
+## Check for the packages required for this assignments
+```{r message=FALSE, warning=FALSE, results='hide'}
+# check package is installed
+if (!requireNamespace("ComplexHeatmap", quietly = TRUE))
+  BiocManager::install("ComplexHeatmap")
+if (!requireNamespace("circlize", quietly = TRUE))
+  install.packages("circlize")
+if (!requireNamespace("gprofiler2", quietly = TRUE))
+  install.packages("gprofiler2")
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+if (!requireNamespace("tibble", quietly = TRUE)) {
+  install.packages("tibble")
+}
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+} 
+if (!requireNamespace("edgeR", quietly = TRUE)) {
+  install.packages("edgeR")
+}
+if (!requireNamespace("limma", quietly = TRUE)) {
+  install.packages("limma")
+}
+if(!requireNamespace("tidyr", quietly = TRUE)) {
+  install.packages("tidyr")
+}
+if(!requireNamespace("stringr", quietly = TRUE)) {
+  install.packages("stringr")
+}
+if(!requireNamespace("knitr", quietly = TRUE)) {
+  install.packages("knitr")
+}
+
+
+```
+
+## Attach the packages in library.
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+suppressPackageStartupMessages({
+library("edgeR")
+library("circlize")
+library("ComplexHeatmap")
+library("gprofiler2")
+library("ggplot2")
+library("tibble")
+library("dplyr")
+library("stringr")
+library("knitr")
+})
+
+```
+
+
+## Load the data from A1 and set the groups
+```{r}
+# Read the normalized counts of GSE150621 into a table
+data<-read.table("./GSE150621_finalized_normalized_counts.txt") 
+head(data)
+
+# The "samples" data frame is created by applying a function to each of the column names. The function splits the column names by "_" and returns the third element of the resulting vector. This third element is assumed to be a label that identifies the sample.
+samples <- data.frame(
+  lapply(colnames(data)[3:16],
+         FUN=function(x){
+           unlist(strsplit(x, split = "_"))[3]})) 
+
+# The resulting "samples" data frame is transposed using the "t" function, so that the labels become row names.
+samples=as.data.frame(t(samples))
+
+# Samples with a label containing "C" is assigned to the control group, D" is assigned to the case group of DPM exporsure, "F" is assigned to the female group, and "M" is assigned to the male group.
+samples[which(samples[,1]=="CF"|samples[,1]=="CM"),2]="Control" 
+samples[which(samples[,1]=="DF"|samples[,1]=="DM"),2]="Case" 
+samples[which(samples[,1]=="CF"|samples[,1]=="DF"),3]="Female"
+samples[which(samples[,1]=="CM"|samples[,1]=="DM"),3]="Male" 
+colnames(samples)=c("label","Group","Gender")
+row.names(samples)=colnames(data)[3:16]
+```
+
+### A multidimensional scaling (MDS) plot based on the "data" data frame.
+```{r}
+# MDS plot from A1 that shows the similarity between the samples based on their gene expression profiles. Samples that are more similar are closer together in the plot.
+
+# Extracted from columns 3 to the last column of the "data" data frame and assigned to a new variable called "heatmap_matrix".
+heatmap_matrix <- data[,3:ncol(data)] 
+
+# The row names of the "heatmap_matrix" are set to the values of the "refGene" column of the "data" data frame.
+rownames(heatmap_matrix) <- data$refGene 
+
+
+# The "plotMDS" function is called on the "heatmap_matrix" with the color argument set to a vector of 8 reds and 6 blues, corresponding to the case/control groups of 14 columns in the "heatmap_matrix".
+plotMDS(heatmap_matrix,col=c(rep("red",8),rep("blue",6)))
+
+# The "legend" function is used to add a legend to the plot. The legend is positioned at the coordinates (2000, -1200) and shows the labels "Case" and "Control" with the corresponding red and blue colors used in the MDS plot. The "cex" parameter controls the size of the legend text.
+legend(x=2000,y=-1200,legend=c("Case","Control"),
+fill=c("red","blue"),cex = 0.7)
+```
+
+
+# Differencial Expression
+
+## Simple Model based on samples' group of case and control
+```{r}
+# Simple model: sets up a linear model to analyze the gene expression data based on the sample group information in the "samples" data frame.
+
+# The "model.matrix" function is called on the "samples" data frame with the formula "~ samples$Group" to create a matrix that defines the linear model. The resulting matrix is assigned to the "model_design" variable.
+model_design <- model.matrix(~ samples$Group )
+
+# Display the first 14 rows of the "model_design" matrix in an HTML table format.
+kable(model_design[1:14,], type="html")
+
+# The expression data is extracted from columns 3 to 16 of the "data" data frame and assigned to a variable called "expressionMatrix". The row names of the "expressionMatrix" are set to the values of the "refGene" column of the "data" data frame, and the column names are set to the sample labels extracted from the column names of the "data" data frame
+expressionMatrix <- as.matrix(data[,3:16])
+rownames(expressionMatrix) <-data$refGene
+colnames(expressionMatrix) <-colnames(data)[3:16]
+
+# An "ExpressionSet" object called "minimalSet" is created from the "expressionMatrix" using the "assayData" argument.
+minimalSet <- Biobase::ExpressionSet(assayData=expressionMatrix)
+
+#  "lmFit" function is called on the "minimalSet" and the "model_design" matrix to fit a linear model to the gene expression data. The resulting fit is assigned to the "fit" variable.
+fit <- limma::lmFit(minimalSet, model_design)
+
+# The "eBayes" function is called on the "fit" variable to compute moderated t-statistics and log-odds of differential expression for each gene. The resulting fit is assigned to the "fit2" variable.
+fit2 <- limma::eBayes(fit, trend=TRUE)
+
+# The "topTable" function is called on the "fit2" variable to generate a table of the top genes ranked by their moderated t-statistics.
+topfit <- limma::topTable(fit2,
+                   coef=ncol(model_design),
+                   adjust.method = "BH",
+                   number = nrow(expressionMatrix))
+
+# The resulting "topfit" table is combined with the "refGene" column to create a new data frame called "output_hits". The first column of "output_hits" is renamed to "refgene". The resulting data frame is sorted by ascending p-value using the "order" function.
+output_hits <- cbind(rownames(topfit),topfit)
+colnames(output_hits)[1]="refgene"
+output_hits <- output_hits[order(output_hits$P.Value),]
+
+# Display the first 10 rows of the "output_hits" data frame in an HTML table format,
+kable(output_hits[1:10,],type="html",row.names = FALSE)
+
+# Two lines are printed to display the number of genes that pass the threshold of p-value < 0.05 and the adjusted p-value < 0.05 in the "Simple Model". I use cutoff 0.05 becuase p value <0.05 is statistically significant and it is a commonly used statistic threshold.
+print(c("The number gene pass the threshold p-value <0.05 in Simple Model:",length(which(output_hits$P.Value < 0.05))))
+print(c("The number gene pass the adjust p-value <0.05 in Simple Model:",length(which(output_hits$adj.P.Val < 0.05))))
+
+```
+
+
+## Multiple Hypothesis Testing
+
+### Account for the gender variability
+
+I used Benjamin-Hochberg [@benjamini1995controlling] method to correct every gene. The reason is that, BH is a powerful and common tool that decreased the false discovery rate. 
+
+```{r}
+# A new linear model is created with the addition of the Gender variable to the previous Group variable in the model matrix with the same parameters.
+# The addition of the Gender variable to the model matrix can help to adjust for the confounding effect of gender on gene expression.
+model_design_gender <- model.matrix(~samples$Gender+samples$Group)
+
+kable(model_design_gender[1:5,],type="html")
+
+fit_gender <- limma::lmFit(minimalSet, model_design_gender)
+
+fit2_gender <- limma::eBayes(fit_gender,trend=TRUE)
+
+topfit_gender <- limma::topTable(fit2_gender,
+                       coef=ncol(model_design_gender),
+                       adjust.method = "BH",
+                       number = nrow(expressionMatrix))
+
+output_hits_gender <- cbind(rownames(topfit_gender),topfit_gender)
+
+colnames(output_hits_gender)[1]="refgene"
+
+# Sort by p value and display the top 10 
+output_hits_gender <- output_hits_gender[order(output_hits_gender$P.Value),]
+
+kable(output_hits_gender[1:10,],type="html",row.names = FALSE)
+
+print(c("The number gene pass the threshold p-value <0.05 in Gender Model:",length(which(output_hits_gender$P.Value < 0.05))))
+print(c("The number gene pass the adjust p-value <0.05 in Gender Model:",length(which(output_hits_gender$adj.P.Val < 0.05))))
+
+
+```
+
+### Heatmap
+From this result, it is clear that samples with GDM-exposred samples clustered together with mostly red top-hits, and the control samples clustered together with mostly blue top-hits.
+
+```{r}
+top_hits <- output_hits_gender$refgene[
+output_hits_gender$P.Value<0.05]
+
+heatmap_matrix_tophits <- t(
+scale(t(heatmap_matrix[
+which(rownames(heatmap_matrix) %in% top_hits),])))
+
+if(min(heatmap_matrix_tophits) == 0){
+heatmap_col = circlize::colorRamp2(c( 0, max(heatmap_matrix_tophits)),
+c( "white", "red"))
+} else {
+heatmap_col = colorRamp2(c(min(heatmap_matrix_tophits), 0,
+max(heatmap_matrix_tophits)), c("blue", "white", "red"))
+}
+
+current_heatmap <- ComplexHeatmap::Heatmap(as.matrix(heatmap_matrix_tophits),
+cluster_rows = TRUE,
+cluster_columns = TRUE,
+show_row_dend = TRUE,
+show_column_dend = TRUE,
+col=heatmap_col,
+show_column_names = TRUE,
+show_row_names = FALSE,
+show_heatmap_legend = TRUE,
+name = "Top hits using Limma(p-value < 0.05): GDM-exposure vs. Control"
+)
+
+plot(current_heatmap)
+```
+
+## Comparision: Simpe vs. Gender Limma
+```{r}
+# The analysis is based on gene expression data, with the aim of identifying genes that are differentially expressed between two groups (case vs control) and exploring whether adding gender as a covariate to the model improves the results.
+
+# Creates the design matrix for the simple model using only the information on the group (samples$Group) as a predictor.
+simple_model_pvalues <- data.frame(refgene =output_hits$refgene,
+                                   simple_pvalue=output_hits$P.Value)
+
+# Repeats the same procedure, but adds the gender (samples$Gender) as an additional predictor.
+gender_model_pvalues <- data.frame(refgene =
+                                  output_hits_gender$refgene,
+                                gender_pvalue = output_hits_gender$P.Value)
+
+# Models is then compared using a scatter plot, where the x-axis represents the p-values from the simple model and the y-axis represents the p-values from the gender model. The color of each point represents whether the gene is significant in the simple model (orange), gender model (blue), both models (red), or neither model (grey). 
+two_models_pvalues <- merge(simple_model_pvalues,
+                            gender_model_pvalues,by.x=1,by.y=1)
+two_models_pvalues$colour <- "black"
+two_models_pvalues$colour[
+  two_models_pvalues$simple_pvalue<0.05] <- "orange"
+two_models_pvalues$colour[
+  two_models_pvalues$gender_pvalue<0.05] <- "blue"
+two_models_pvalues$colour[
+  two_models_pvalues$simple_pvalue<0.05 &
+    two_models_pvalues$gender_pvalue<0.05] <- "red"
+plot(two_models_pvalues$simple_pvalue,
+     two_models_pvalues$gender_pvalue,
+     col = two_models_pvalues$colour,
+     xlab = "simple model p-values",
+     ylab ="gender model p-values",
+     main="Simple vs Gender Limma")
+legend(0,1,legend=c("Simple","limma Gender","Both","not Signif"),
+fill=c("orange","blue","red","grey"),cex = 0.7)
+
+```
+
+## Using the quasi-likelihood F-test (QLF) by EdgeR
+
+There are 401 genes pass the p < 0.05 threshold and 0 of them pass FDR < 0.05
+
+```{r}
+# create a DGEList object d from the count data and grouping information using the DGEList() function.
+d = DGEList(counts=expressionMatrix, group=samples$Group)
+
+# I estimate the dispersion using the estimateDisp() function with the model_design_gender model matrix.
+d <- estimateDisp(d, model_design_gender)
+
+# Fit a generalized linear model using the glmQLFit() function with the model_design_gender model matrix. 
+fit <- glmQLFit(d, model_design_gender)
+
+# Use the glmQLFTest() function to perform a contrast of interest between the control and treatment groups 
+qlf.pos_vs_neg <- glmQLFTest(fit,coef = "samples$GroupControl")
+kable(topTags(qlf.pos_vs_neg), type="html",row.names = FALSE)
+
+# Use the topTags() function to extract the top differentially expressed genes based on their P Value and FDR values.
+qlf_output_hits <- topTags(qlf.pos_vs_neg,sort.by = "PValue",
+                           adjust.method = "BH",
+                           n = nrow(data))
+
+# Print out the number of genes passing a threshold of P Value < 0.05 and FDR < 0.05
+print(c("The number gene pass the threshold p-value <0.05 in qlf Model:",length(which(qlf_output_hits$table$PValue < 0.05))))
+print(c("The number gene pass the Adjust p-value <0.05 in qlf Model:",length(which(qlf_output_hits$table$FDR < 0.05))))
+```
+
+### Heatmap
+From this result, it is clear that samples with GDM-exposured samples clustered together with mostly red top-hits, and the control samples clustered together with mostly blue top-hits.
+
+```{r}
+top_hits <- rownames(qlf_output_hits$table)[
+output_hits_gender$P.Value<0.05]
+
+heatmap_matrix_tophits <- t(
+scale(t(heatmap_matrix[which(rownames(heatmap_matrix)
+%in% top_hits),])))
+
+if(min(heatmap_matrix_tophits) == 0){
+heatmap_col = colorRamp2(c( 0, max(heatmap_matrix_tophits)),
+c( "white", "red"))
+} else {
+heatmap_col = colorRamp2(c(min(heatmap_matrix_tophits), 0,
+max(heatmap_matrix_tophits)),
+c("blue", "white", "red"))
+}
+current_heatmap <- Heatmap(as.matrix(heatmap_matrix_tophits),
+cluster_rows = TRUE,
+cluster_columns = FALSE,
+show_row_dend = TRUE,
+show_column_dend = FALSE,
+col=heatmap_col,
+show_column_names = TRUE,
+show_row_names = FALSE,
+show_heatmap_legend = TRUE,
+name = "Top hits using QLM(p-value < 0.05): GDM-exposured vs.Control "
+)
+
+current_heatmap
+```
+
+# Threshold over-Representation Analysis
+
+## Display the top-hits with threshold < 0.05 generated by using the BH method of edge R aboved
+```{r}
+kable(topTags(qlf.pos_vs_neg), type="html")
+```
+
+## 20 up-regulated genes 
+```{r}
+length(which(qlf_output_hits$table$PValue < 0.05
+& qlf_output_hits$table$logFC > 0))
+
+```
+## 381 down-regulated genes
+```{r}
+length(which(qlf_output_hits$table$PValue < 0.05
+& qlf_output_hits$table$logFC < 0))
+```
+## Created a Threshold lists of genes
+```{r}
+upreg_genes<- row.names(qlf_output_hits)[
+  which(qlf_output_hits$table$PValue < 0.05 & qlf_output_hits$table$logFC > 0)]
+
+downreg_genes <- row.names(qlf_output_hits)[
+  which(qlf_output_hits$table$PValue < 0.05 & qlf_output_hits$table$logFC < 0)]
+```
+
+```{r}
+write.table(x=upreg_genes,
+            "upregulated_genes.txt",sep='\t',
+            row.names = FALSE,col.names = FALSE,quote = FALSE)
+write.table(x=downreg_genes,
+            "downregulated_genes.txt",sep='\t',
+            row.names = FALSE,col.names = FALSE,quote = FALSE)
+```
+
+
+## G:Profiler analysis on the thresholded gene lists
+I use [G profiler](https://biit.cs.ut.ee/gprofiler/gost)[@gprofiler2] because it is a great visualization tool for analyzing the over-representation in thresholded gene list. All queries were run using the following parameters. I also set the term size to be 1-200 to have a specific look at processes regulated.
+![***Figure 6. G:Profiler parameters for running differentially expressed genes.***]](./gProfiler/parameters.png)
+
+I used annotation data from GO biological process, reactome, and wikipathways. Their versions are December 4, 2022, December 28, 2022, and Decmber 10, 2022 respectively. Because GO BP involves in the the description of biological process, reactome is very detailed, wikipathways because more annotation databases are included for a higher coverage. 
+
+It is worth noticing that the results of query using the down-regulated genes and the results of query using both the up and down-regulated genes are almost identical. This is maybe due to the fact that there are only 20 up regulated but 381 down-regulated genes in the lists, which means most of them are down-regulated genes and this causes the most results have a larger tendency to be reflect on the down-regulated genes. 
+
+
+### results using both the upregulated and downregulated genes:
+The number of genesets returned and the top-hit term:
+GO:BP: 4028, with negative regulation of viral process (16)
+reactome: 657, with  Interferon alpha/beta signaling(17)   
+WikiPathways: 377, with Type I interferon induction and signaling during SARS-CoV-2 infection(10)
+
+![***Figure 1. All differencially expressed genes over-representation analysis results from GO:BP, term size = 200.***](./gProfiler/all_genes_GOBP.png)
+
+![***Figure 2. All differencially expressed genes over-representation analysis results from Reactome, term size = 200.***](./gProfiler/all_genes_reac.png)
+
+![***Figure 3. All differencially expressed genes over-representation analysis results from WikiPathways, term size = 200.***](./gProfiler/all_genes_wp.png)
+
+### results only using the upregulated genes:
+The number of genesets returned and the top-hit term:
+GO:BP: 3721, with negative regulation of viral process (16)
+reactome: 623, with  Interferon alpha/beta signaling(17)   
+WikiPathways: 359, with Type I interferon induction and signaling during SARS-CoV-2 infection(10)
+
+![***Figure 4. Up-regulated genes over-representation analysis results from GO:BP, term size = 200.***](./gProfiler/up_regulated_GOBP.png)
+
+![***Figure 5. Up-regulated genes over-representation analysis results from Reactome, term size = 200.***](./gProfiler/up_regulated_reac.png)
+
+![***Figure 6. Up-regulated genes over-representation analysis results from WikiPathways, term size = 200.***](./gProfiler/up_regulated_wp.png)
+
+### results only using the downregulated genes:
+The number of genesets returned and the top-hit term:
+GO:BP: 3721, with negative regulation of viral process (16)
+reactome: 623, with  Interferon alpha/beta signaling(17)   
+WikiPathways: 359, with Type I interferon induction and signaling during SARS-CoV-2 infection(10)
+
+
+![***Figure 7. down-regulated genes over-representation analysis results from GO:BP, term size = 200.***](./gProfiler/down_regulated_GOBP.png)
+
+![***Figure 8. down-regulated genes over-representation analysis results from Reactome, term size = 200.***](./gProfiler/down_regulated_reac.png)
+
+![***Figure 9. down-regulated genes over-representation analysis results from WikiPathways, term size = 200.***](./gProfiler/down_regulated_wp.png)
+
+
+
+# Interpretation
+
+**Do the over-representation results support conclusions or mechanism discussed in the original paper? **  
+
+Yes, the original paper shows the top 10 differcially expressed genes as:
+
+![***Figure 10. Top 10 Differentially expressed genes identified via RNA sequencing in paper***]](./gProfiler/differencial_gene_expression_paper.png)
+Except for the 10th one, SERPINA9, all other genes are in the downregulated gene lists. It also identified top 15 canonical pathways: Role of cytokines and chemokines in inflammation, Role of cytokines in mediating communication between immune cells, Role of pattern recognition receptors in recognition of bacteria and viruses, Granulocyte adhesion and diapedesis, Neuroinflammation signaling pathway, Interferon signaling, FXR/RXR activation, Atherosclerosis signaling, IL-10(interleukin 10) signaling, Hepatic cholestasis, liver X / retinoid X activation, Superpathway of melatonin degradation, Agranulocyte adhesion and diapedesis, Pathogenesis of multiple sclerosis, lipopolysaccharide/IL-1( interleukin 1) mediated inhibition of RXR function. All of these can be found in our results from G:Profiler. 
+
+
+over-representation results show that   
+
+**Can you find evidence, i.e. publications, to support some of the results that you see. How does this evidence support your results.**  
+
+Yes, in our results it show that IFI44 as being the second strongest differencial expressed gene. IFI44 is a member of the ISG class, which aggregates to form microtubular structures within the cytoskeleton, facilitating intracellular transport of secretory vesicles, and regulates cell division through mitosis and meiosis. In paper [Type III interferons produced by human placental trophoblasts confer protection against Zika virus infection](http://dx.doi.org/10.1016/j.chom.2016.03.008)[@bayer2016type], it identified that IFI44 is expressed in the trophoblast and may be a part of the innate immune response of pregnancy. 
+
+ 
+
+***
+
+# References
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
